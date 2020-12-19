@@ -21,12 +21,17 @@ CREATE TABLE IF NOT EXISTS facts (
 "])
   jdbc-connection)
 
-(defn max-transaction-id [db-spec]
-  (first
-   (jdbc/execute-one!
-    db-spec
-    ["SELECT MAX(IFNULL(MAX(added_transaction_id), 0), IFNULL(MAX(retracted_transaction_id), 0)) FROM facts"]
-    {:builder-fn result-set/as-arrays})))
+(defn max-transaction-ids [jdbc-connection]
+  (jdbc/execute-one!
+   jdbc-connection
+   ["select max(added_transaction_id) as max_added_transaction_id,
+            max(retracted_transaction_id) as max_retracted_transaction_id from facts"]
+   {:builder-fn result-set/as-kebab-maps}))
+
+(defn max-transaction-id [jdbc-connection]
+  (let [{:keys [max-added-transaction-id max-retracted-transaction-id]}
+        (max-transaction-ids jdbc-connection)]
+    (apply max (filter identity [max-added-transaction-id max-retracted-transaction-id 0]))))
 
 (defn make-db [jdbc-connection]
   {:jdbc-connection jdbc-connection :transaction-id (max-transaction-id jdbc-connection)})
