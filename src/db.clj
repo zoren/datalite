@@ -7,7 +7,7 @@
    ))
 
 (defn connect [jdbc-connection]
-  (jdbc/execute!
+  (jdbc/execute-one!
    jdbc-connection
    ["
 CREATE TABLE IF NOT EXISTS facts (
@@ -38,9 +38,7 @@ CREATE TABLE IF NOT EXISTS facts (
       (sql/insert-multi!
        jdbc-transaction :facts
        [:entity :attribute :value :added_transaction_id]
-       (map
-        #(into % [transaction-id])
-        facts-to-add))
+       (map #(into % [transaction-id]) facts-to-add))
       (when-not (empty? fact-ids-to-retract)
         (jdbc/execute-one!
          jdbc-transaction
