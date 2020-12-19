@@ -69,3 +69,26 @@
     (is (= 1 (count (filter-index (make-db connection) :eavt [1 "set" 34]))))
     (transact connection [[1 "set" 1] [1 "set" 34] [1 "set" 34] [1 "set" 5]] [])
     (is (= {1 3, 5 1, 34 3} (histogram (map first (filter-index (make-db connection) :eavt [1 "set"])))))))
+
+(defn print-fact-table [connection]
+  (clojure.pprint/print-table (get-raw-facts-table connection)))
+
+(comment
+  (def connection (connect (make-mem-sqlite-db)))
+  (max-transaction-id connection)
+  (print-fact-table connection)
+  ;;(def connection (connect (jdbc/get-connection "jdbc:sqlite:test.db")))
+  (transact connection [[1 "set" 1] [1 "set" 2] [1 "set" 3]] [])
+  (transact connection [[10 "s" "str"]] [])
+  (def db (make-db connection))
+  (transact connection [[10 "x" 54]
+                        [10 "y" 36]] [])
+  (transact connection [] [1 3])
+  (transact connection [] [2])
+
+  (filter-index (make-db connection) :eavt [])
+  (filter-index (make-db connection) :eavt [1 "set"])
+  (filter-index db :eavt [])
+  (filter-index {:jdbc-connection connection
+                 :transaction-id 1} :eavt [])
+  )
