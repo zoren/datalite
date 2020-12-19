@@ -6,55 +6,72 @@
    [next.jdbc.result-set :as result-set]
    ))
 
-(def fact-columns [:entity :attribute :value :transaction_id])
-
-(defn connect [connection]
+(defn connect [jdbc-connection]
   (jdbc/execute!
-   connection
+   jdbc-connection
    ["
 CREATE TABLE IF NOT EXISTS facts (
   entity,
   attribute,
   value,
-  transaction_id INTEGER NOT NULL)"])
-  connection)
+  added_transaction_id INTEGER NOT NULL,
+  retracted_transaction_id INTEGER,
+  fact_id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT  -- ensure monotonically increasing fact_id used as row id
+)
+"])
+  jdbc-connection)
 
-(defn- next-transaction-id [db-spec]
+(defn max-transaction-id [db-spec]
   (first
    (jdbc/execute-one!
     db-spec
-    ["SELECT IFNULL(MAX(transaction_id), 0) + 1 FROM facts"]
+    ["SELECT MAX(IFNULL(MAX(added_transaction_id), 0), IFNULL(MAX(retracted_transaction_id), 0)) FROM facts"]
     {:builder-fn result-set/as-arrays})))
 
-(defn make-db [connection]
-  {:connection connection :transaction-id (next-transaction-id connection)})
+(defn make-db [jdbc-connection]
+  {:jdbc-connection jdbc-connection :transaction-id (max-transaction-id jdbc-connection)})
 
-(defn insert-facts [ds facts]
-  (jdbc/with-transaction [tx ds]
-    (let [transaction-id (next-transaction-id ds)]
+(defn transact
+  [jdbc-connection facts-to-add fact-ids-to-retract]
+  (jdbc/with-transaction [jdbc-transaction jdbc-connection]
+    (let [transaction-id (inc (max-transaction-id jdbc-transaction))]
       (sql/insert-multi!
-       tx :facts
-       fact-columns
+       jdbc-transaction :facts
+       [:entity :attribute :value :added_transaction_id]
        (map
         #(into % [transaction-id])
-        facts)))))
+        facts-to-add))
+      (when-not (empty? fact-ids-to-retract)
+        (jdbc/execute-one!
+         jdbc-transaction
+         (honey/format
+          {:update :facts
+           :set {:retracted_transaction_id transaction-id}
+           :where [:and [:= :retracted_transaction_id nil] [:in :fact_id fact-ids-to-retract]]})))
+      {:transaction-id transaction-id})))
 
-(def char->column (into {} (map (fn [col] [(-> col name first) col]) fact-columns)))
+(def char->column
+  {\e :entity
+   \a :attribute
+   \v :value
+   \t :added_transaction_id})
 
 (defn- index-map [{:keys [index order]} {:keys [transaction-id values]}]
   (let [columns (map char->column (name index))]
     {:from [:facts]
      :order-by (map (fn [col] [col order]) columns)
-     :where (into [:and [:< :transaction_id transaction-id]]
+     :where (into [:and [:<= :added_transaction_id transaction-id]
+                   [:or [:= :retracted_transaction_id nil] [:< transaction-id :retracted_transaction_id]]]
                   (map (fn [col val] [:= col val]) columns values))
-     :select (if (= (count columns) (count values))
-               [:entity]
-               (drop (count values) columns))}))
+     :select (conj (into [] (drop (count values) columns)) :fact_id)}))
 
-(defn filter-index [{:keys [transaction-id connection]} index values]
+(defn filter-index [{:keys [jdbc-connection transaction-id]} index values]
   (rest
    (jdbc/execute!
-    connection
+    jdbc-connection
     (honey/format
      (index-map {:index index :order :asc} {:transaction-id transaction-id :values values}))
     {:builder-fn result-set/as-unqualified-arrays})))
+
+(defn get-raw-facts-table [connection]
+  (sql/find-by-keys connection :facts :all {:builder-fn result-set/as-unqualified-maps}))
