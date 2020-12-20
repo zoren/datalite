@@ -40,10 +40,6 @@ CREATE TABLE IF NOT EXISTS facts (
   [jdbc-connection facts-to-add fact-ids-to-retract]
   (jdbc/with-transaction [jdbc-transaction jdbc-connection]
     (let [transaction-id (inc (max-transaction-id jdbc-transaction))]
-      (sql/insert-multi!
-       jdbc-transaction :facts
-       [:entity :attribute :value :added_transaction_id]
-       (map #(into % [transaction-id]) facts-to-add))
       (when-not (empty? fact-ids-to-retract)
         (jdbc/execute-one!
          jdbc-transaction
@@ -51,6 +47,10 @@ CREATE TABLE IF NOT EXISTS facts (
           {:update :facts
            :set {:retracted_transaction_id transaction-id}
            :where [:and [:= :retracted_transaction_id nil] [:in :fact_id fact-ids-to-retract]]})))
+      (sql/insert-multi!
+       jdbc-transaction :facts
+       [:entity :attribute :value :added_transaction_id]
+       (map #(into % [transaction-id]) facts-to-add))
       {:transaction-id transaction-id})))
 
 (def char->column

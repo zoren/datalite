@@ -44,6 +44,10 @@
     (is (= 0 (count (filter-index (make-db connection) :eavt []))))
     (testing "can add fact back in"
       (transact connection [[1 "s" "str"]] [])
+      (is (= 1 (count (filter-index (make-db connection) :eavt []))))))
+  (testing "if we guess id's we cannot delete facts as we're adding them"
+    (let [connection (connect (make-mem-sqlite-db))]
+      (transact connection [[1 "s" "str"]] [1])
       (is (= 1 (count (filter-index (make-db connection) :eavt [])))))))
 
 (deftest set-test
